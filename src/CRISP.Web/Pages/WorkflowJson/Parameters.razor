@@ -1,0 +1,147 @@
+@page "/workflow-json/parameters"
+@page "/parameters"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Parameters</div>
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Version-wise Parameters</MudText>
+                <MudText Typo="Typo.body2" Class="muted">Parameters are shown from database mappings for the selected workflow version. Master definitions are maintained separately.</MudText>
+            </div>
+            <div class="admin-button-row">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Href="/workflow-json/parameter-master">Parameter Master</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/workflow-json/mappings">Manage Mapping</MudButton>
+            </div>
+        </div>
+
+        <div class="admin-grid-3">
+            <MudSelect T="int" Value="IndustryId" ValueChanged="ChangeIndustry" Label="Industry" Variant="Variant.Outlined">
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int" Value="@industry.Id">@industry.IndustryName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Value="WorkflowCode" ValueChanged="ChangeWorkflow" Label="Workflow" Variant="Variant.Outlined" Disabled="@(IndustryId <= 0)">
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">@workflow.WorkflowName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="int" Value="VersionNo" ValueChanged="ChangeVersion" Label="JSON Version" Variant="Variant.Outlined" Disabled="@(string.IsNullOrWhiteSpace(WorkflowCode))">
+                @foreach (var version in Versions)
+                {
+                    <MudSelectItem T="int" Value="@version.VersionNo">@version.VersionNo — @version.VersionName (@version.Status)</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (Busy)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-3" />
+        }
+        @if (!string.IsNullOrWhiteSpace(LoadError))
+        {
+            <MudAlert Severity="Severity.Error" Class="my-3">@LoadError</MudAlert>
+        }
+        else if (!Busy && Rows.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Class="my-3">No parameter mappings exist for the selected workflow version and industry. Open Manage Mapping to configure them.</MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="my-3">
+                Version @VersionNo · @Rows.Count(x => x.IsMapped) mapped parameters · Total weight @Rows.Where(x => x.IsMapped).Sum(x => x.Weight).ToString("0.##")%
+            </MudAlert>
+            <MudTable Items="Rows.Where(x => x.IsMapped).OrderBy(x => x.DisplayOrder)" Dense="true" Hover="true" Class="admin-table">
+                <HeaderContent>
+                    <MudTh>Order</MudTh><MudTh>Parameter Code</MudTh><MudTh>Master Parameter</MudTh><MudTh>Display Name</MudTh><MudTh>Value Type</MudTh><MudTh>Weight %</MudTh><MudTh>Scale ID</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.DisplayOrder</MudTd>
+                    <MudTd>@context.ParameterCode</MudTd>
+                    <MudTd>@context.MasterParameterName</MudTd>
+                    <MudTd>@context.ParameterDisplayName</MudTd>
+                    <MudTd>@context.ValueType</MudTd>
+                    <MudTd>@context.Weight.ToString("0.##")</MudTd>
+                    <MudTd>@(context.ScaleConfigurationId?.ToString() ?? "—")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<VersionDto> Versions = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private List<IndustryParameterMappingDto> Rows = [];
+    private string WorkflowCode = string.Empty;
+    private IEnumerable<WorkflowDto> IndustryWorkflows => Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+    private int VersionNo;
+    private int IndustryId;
+    private bool Busy;
+    private string LoadError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Industries = (await Api.GetAllIndustriesAsync()).OrderBy(x => x.IndustryName).ToList();
+            Workflows = await Api.GetWorkflowsAsync();
+            // Start blank: select industry, then workflow, then version.
+            IndustryId = 0;
+            WorkflowCode = string.Empty;
+            VersionNo = 0;
+            Versions = [];
+            Rows = [];
+        }
+        catch (Exception ex) { LoadError = ex.Message; }
+    }
+
+    private Task ChangeIndustry(int value)
+    {
+        IndustryId = value;
+        WorkflowCode = string.Empty;
+        VersionNo = 0;
+        Versions = [];
+        Rows = [];
+        LoadError = string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        WorkflowCode = value;
+        Rows = [];
+        Versions = await Api.GetVersionsAsync(WorkflowCode);
+        var selected = Versions.Where(x => x.Status.Equals("Draft", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.VersionNo).FirstOrDefault()
+            ?? Versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+        VersionNo = selected?.VersionNo ?? 0;
+        await LoadRows();
+    }
+
+    private async Task ChangeVersion(int value)
+    {
+        VersionNo = value;
+        await LoadRows();
+    }
+
+    private async Task LoadRows()
+    {
+        LoadError = string.Empty;
+        if (string.IsNullOrWhiteSpace(WorkflowCode) || VersionNo <= 0 || IndustryId <= 0)
+        {
+            Rows = [];
+            return;
+        }
+        Busy = true;
+        try { Rows = await Api.GetIndustryParameterMappingsAsync(WorkflowCode, VersionNo, IndustryId); }
+        catch (Exception ex) { Rows = []; LoadError = ex.Message; }
+        finally { Busy = false; }
+    }
+}

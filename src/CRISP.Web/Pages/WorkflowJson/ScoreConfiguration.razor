@@ -1,0 +1,769 @@
+@page "/workflow-json/score-configuration"
+@rendermode InteractiveServer
+
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+
+    <div class="crumb">
+        Workflow JSON / Score Configuration
+    </div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Score Configuration</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Configure score definitions and value ranges for industry mapped parameters.
+                </MudText>
+            </div>
+
+            <div class="admin-button-row">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           Disabled="@Busy"
+                           OnClick="LoadConfiguration">
+                    Reload
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           Disabled="@(Busy || IsReadOnly || SelectedMappingId <= 0 || Configuration is null)"
+                           OnClick="SaveConfiguration">
+                    Save Configuration
+                </MudButton>
+            </div>
+        </div>
+
+        @* INDUSTRY -> WORKFLOW -> JSON VERSION *@
+
+        <div class="admin-grid-3">
+
+            <MudSelect T="int?"
+                       Value="@(IndustryId > 0 ? (int?)IndustryId : null)"
+                       ValueChanged="ChangeIndustrySelection"
+                       Label="Industry"
+                       Placeholder="Select industry"
+                       Variant="Variant.Outlined"
+                       Disabled="@Busy"
+                       Clearable="true">
+
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)industry.Id)">
+                        @industry.IndustryName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="string"
+                       Value="@(string.IsNullOrWhiteSpace(WorkflowCode) ? null : WorkflowCode)"
+                       ValueChanged="ChangeWorkflow"
+                       Label="Workflow"
+                       Placeholder="Select workflow"
+                       Variant="Variant.Outlined"
+                       Disabled="@(Busy || IndustryId <= 0)"
+                       Clearable="true">
+
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">
+                        @workflow.WorkflowName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="int?"
+                       Value="@(VersionNo > 0 ? (int?)VersionNo : null)"
+                       ValueChanged="ChangeVersionSelection"
+                       Label="JSON Version"
+                       Placeholder="Select JSON version"
+                       Variant="Variant.Outlined"
+                       Disabled="@(Busy || string.IsNullOrWhiteSpace(WorkflowCode))"
+                       Clearable="true">
+
+                @foreach (var version in Versions.OrderByDescending(x => x.VersionNo))
+                {
+                    <MudSelectItem T="int?" Value="@((int?)version.VersionNo)">
+                        @version.VersionNo - @version.Status
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+        </div>
+
+        @* MAPPED PARAMETER *@
+
+        <div class="mt-4">
+            <MudSelect T="int?"
+                       Value="@(SelectedMappingId > 0 ? (int?)SelectedMappingId : null)"
+                       ValueChanged="ChangeParameterSelection"
+                       Label="Mapped Parameter"
+                       Placeholder="Select mapped parameter"
+                       Variant="Variant.Outlined"
+                       Disabled="@(Busy || IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode) || VersionNo <= 0 || MappedParameters.Count == 0)"
+                       Clearable="true">
+
+                @foreach (var parameter in MappedParameters)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)parameter.IndustryParameterMappingId)">
+                        @parameter.ParameterCode - @parameter.ParameterDisplayName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (VersionNo > 0)
+        {
+            <MudAlert Severity="@(IsReadOnly ? Severity.Warning : Severity.Info)"
+                      Dense="true"
+                      Variant="Variant.Outlined"
+                      Class="my-3">
+
+                Version: <b>@VersionNo</b>
+
+                @if (CurrentVersion is not null)
+                {
+                    <span> · Status: <b>@CurrentVersion.Status</b></span>
+                }
+
+                @if (IsReadOnly)
+                {
+                    <span>
+                        · Published/Archived versions are read-only.
+                        Configure scores on a Draft version.
+                    </span>
+                }
+            </MudAlert>
+        }
+
+        @if (!Busy && VersionNo > 0 && IndustryId > 0 && MappedParameters.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning"
+                      Variant="Variant.Outlined"
+                      Class="my-3">
+                No parameters are mapped for this industry and version.
+                Configure Industry Parameter Mapping first.
+            </MudAlert>
+        }
+
+        @if (Busy)
+        {
+            <div class="d-flex justify-center pa-6">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            </div>
+        }
+        else if (Configuration is not null && SelectedMappingId > 0)
+        {
+            @* SCALE CONFIGURATION *@
+
+            <MudPaper Class="pa-4 mt-4" Elevation="0" Outlined="true">
+
+                <MudText Typo="Typo.h6" Class="mb-3">
+                    Scale Configuration
+                </MudText>
+
+                <div class="admin-grid-3">
+
+                    <MudTextField T="string"
+                                  @bind-Value="Configuration.ScaleCode"
+                                  Label="Scale Code"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@(IsReadOnly || Configuration.ScaleConfigurationId.HasValue)" />
+
+                    <MudTextField T="string"
+                                  @bind-Value="Configuration.ScaleName"
+                                  Label="Scale Name"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@IsReadOnly" />
+
+                    <MudTextField T="string"
+                                  Value="@SelectedParameterName"
+                                  Label="Parameter"
+                                  ReadOnly="true"
+                                  Variant="Variant.Outlined" />
+
+                </div>
+
+                <div class="admin-grid-3 mt-3">
+
+                    <MudNumericField T="decimal"
+                                     Value="@Configuration.MinValue"
+                                     Label="Overall Minimum"
+                                     ReadOnly="true"
+                                     Variant="Variant.Outlined" />
+
+                    <MudNumericField T="decimal"
+                                     Value="@Configuration.MaxValue"
+                                     Label="Overall Maximum"
+                                     ReadOnly="true"
+                                     Variant="Variant.Outlined" />
+
+                    <MudTextField T="string"
+                                  Value="@($"{Configuration.Scores.Count} score band(s)")"
+                                  Label="Score Bands"
+                                  ReadOnly="true"
+                                  Variant="Variant.Outlined" />
+
+                </div>
+            </MudPaper>
+
+            @* SCORE BANDS *@
+
+            <MudPaper Class="pa-4 mt-4" Elevation="0" Outlined="true">
+
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <div>
+                        <MudText Typo="Typo.h6">Score Bands</MudText>
+                        <MudText Typo="Typo.caption" Class="muted">
+                            Define the score, description and minimum/maximum value range.
+                        </MudText>
+                    </div>
+
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               Disabled="@IsReadOnly"
+                               OnClick="AddScore">
+                        Add Score
+                    </MudButton>
+                </div>
+
+                <MudTable Items="Configuration.Scores"
+                          Dense="true"
+                          Hover="true"
+                          Class="admin-table">
+
+                    <HeaderContent>
+                        <MudTh Style="width:100px">Score</MudTh>
+                        <MudTh>Definition</MudTh>
+                        <MudTh Style="width:170px">Min Value</MudTh>
+                        <MudTh Style="width:170px">Max Value</MudTh>
+                        <MudTh Style="width:90px">Action</MudTh>
+                    </HeaderContent>
+
+                    <RowTemplate>
+                        <MudTd>
+                            <MudNumericField T="int"
+                                             @bind-Value="context.Score"
+                                             Min="1"
+                                             Variant="Variant.Outlined"
+                                             Margin="Margin.Dense"
+                                             Disabled="@IsReadOnly" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudTextField T="string"
+                                          @bind-Value="context.Definition"
+                                          Placeholder="Score definition"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          Disabled="@IsReadOnly" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudNumericField T="decimal?"
+                                             @bind-Value="context.MinValue"
+                                             Variant="Variant.Outlined"
+                                             Margin="Margin.Dense"
+                                             Disabled="@IsReadOnly" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudNumericField T="decimal?"
+                                             @bind-Value="context.MaxValue"
+                                             Variant="Variant.Outlined"
+                                             Margin="Margin.Dense"
+                                             Disabled="@IsReadOnly" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Color="Color.Error"
+                                           Disabled="@IsReadOnly"
+                                           OnClick="@(() => RemoveScore(context))" />
+                        </MudTd>
+                    </RowTemplate>
+
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 muted">
+                            No score bands configured. Click Add Score to create the first score.
+                        </MudText>
+                    </NoRecordsContent>
+
+                </MudTable>
+            </MudPaper>
+        }
+
+    </MudPaper>
+</div>
+
+@code {
+    // LOOKUPS
+
+    private List<WorkflowDto> Workflows = [];
+    private List<VersionDto> Versions = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private List<IndustryParameterMappingDto> Mappings = [];
+
+    // QUERY PARAMETERS - retained for compatibility with existing navigation
+
+    [SupplyParameterFromQuery(Name = "workflowCode")]
+    public string? QueryWorkflowCode { get; set; }
+
+    [SupplyParameterFromQuery(Name = "versionNo")]
+    public int? QueryVersionNo { get; set; }
+
+    [SupplyParameterFromQuery(Name = "industryId")]
+    public int? QueryIndustryId { get; set; }
+
+    // SELECTIONS
+
+    private string WorkflowCode = string.Empty;
+
+    private IEnumerable<WorkflowDto> IndustryWorkflows =>
+        Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+
+    private int VersionNo;
+    private int IndustryId;
+    private int SelectedMappingId;
+
+    // CONFIGURATION
+
+    private ScoreConfigurationDto? Configuration;
+    private bool Busy;
+
+    // COMPUTED PROPERTIES
+
+    private VersionDto? CurrentVersion =>
+        Versions.FirstOrDefault(x => x.VersionNo == VersionNo);
+
+    private bool IsReadOnly =>
+        CurrentVersion is not null &&
+        (
+            CurrentVersion.IsPublished ||
+            CurrentVersion.Status.Equals("Published", StringComparison.OrdinalIgnoreCase) ||
+            CurrentVersion.Status.Equals("Archived", StringComparison.OrdinalIgnoreCase) ||
+            CurrentVersion.Status.Equals("Archieve", StringComparison.OrdinalIgnoreCase)
+        );
+
+    private List<IndustryParameterMappingDto> MappedParameters =>
+        Mappings
+            .Where(x => x.IsMapped && x.IndustryParameterMappingId > 0)
+            .OrderBy(x => x.DisplayOrder > 0 ? x.DisplayOrder : int.MaxValue)
+            .ThenBy(x => x.ParameterDisplayName)
+            .ToList();
+
+    private string SelectedParameterName
+    {
+        get
+        {
+            var mapping = Mappings.FirstOrDefault(
+                x => x.IndustryParameterMappingId == SelectedMappingId);
+
+            if (mapping is null)
+                return string.Empty;
+
+            return string.IsNullOrWhiteSpace(mapping.ParameterDisplayName)
+                ? mapping.MasterParameterName
+                : mapping.ParameterDisplayName;
+        }
+    }
+
+    // INITIAL LOAD
+
+    protected override async Task OnInitializedAsync()
+    {
+        Busy = true;
+
+        try
+        {
+            Workflows = await Api.GetWorkflowsAsync();
+
+            Industries = (await Api.GetAllIndustriesAsync())
+                .OrderBy(x => x.IndustryName)
+                .ToList();
+
+            // Start with placeholders; don't display zero or auto-select options.
+            IndustryId = 0;
+            WorkflowCode = string.Empty;
+            VersionNo = 0;
+            SelectedMappingId = 0;
+            Versions = [];
+            Mappings = [];
+            Configuration = null;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Score configuration could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    // INDUSTRY SELECTION
+
+    private Task ChangeIndustrySelection(int? value) =>
+        ChangeIndustry(value ?? 0);
+
+    private Task ChangeIndustry(int value)
+    {
+        IndustryId = value;
+        WorkflowCode = string.Empty;
+        VersionNo = 0;
+        Versions = [];
+        Mappings = [];
+        SelectedMappingId = 0;
+        Configuration = null;
+
+        return Task.CompletedTask;
+    }
+
+    // WORKFLOW SELECTION
+
+    private async Task ChangeWorkflow(string? value)
+    {
+        WorkflowCode = value ?? string.Empty;
+
+        VersionNo = 0;
+        SelectedMappingId = 0;
+        Versions = [];
+        Mappings = [];
+        Configuration = null;
+
+        if (IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode))
+            return;
+
+        await LoadWorkflowOptions();
+    }
+
+    private async Task LoadWorkflowOptions()
+    {
+        try
+        {
+            Busy = true;
+
+            Versions = await Api.GetVersionsAsync(WorkflowCode);
+
+            // Keep the version dropdown blank until the user selects a version.
+            VersionNo = 0;
+            SelectedMappingId = 0;
+            Mappings = [];
+            Configuration = null;
+        }
+        catch (Exception ex)
+        {
+            Versions = [];
+            Snackbar.Add(
+                $"Workflow versions could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    // VERSION SELECTION
+
+    private Task ChangeVersionSelection(int? value) =>
+        ChangeVersion(value ?? 0);
+
+    private async Task ChangeVersion(int value)
+    {
+        VersionNo = value;
+        SelectedMappingId = 0;
+        Mappings = [];
+        Configuration = null;
+
+        if (VersionNo <= 0)
+            return;
+
+        await LoadMappings();
+    }
+
+    // MAPPINGS
+
+    private async Task LoadMappings()
+    {
+        if (string.IsNullOrWhiteSpace(WorkflowCode) ||
+            VersionNo <= 0 ||
+            IndustryId <= 0)
+        {
+            Mappings = [];
+            SelectedMappingId = 0;
+            Configuration = null;
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            Mappings = await Api.GetIndustryParameterMappingsAsync(
+                WorkflowCode,
+                VersionNo,
+                IndustryId);
+
+            // Let the user select the mapped parameter.
+            SelectedMappingId = 0;
+            Configuration = null;
+        }
+        catch (Exception ex)
+        {
+            Mappings = [];
+            SelectedMappingId = 0;
+            Configuration = null;
+
+            Snackbar.Add(
+                $"Parameter mappings could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    // PARAMETER SELECTION
+
+    private Task ChangeParameterSelection(int? value) =>
+        ChangeParameter(value ?? 0);
+
+    private async Task ChangeParameter(int value)
+    {
+        SelectedMappingId = value;
+        Configuration = null;
+
+        if (SelectedMappingId <= 0)
+            return;
+
+        await LoadConfiguration();
+    }
+
+    // CONFIGURATION
+
+    private async Task LoadConfiguration()
+    {
+        if (SelectedMappingId <= 0)
+        {
+            Configuration = null;
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            await LoadConfigurationInternal();
+        }
+        catch (Exception ex)
+        {
+            Configuration = null;
+
+            Snackbar.Add(
+                $"Score configuration could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task LoadConfigurationInternal()
+    {
+        if (SelectedMappingId <= 0)
+        {
+            Configuration = null;
+            return;
+        }
+
+        Configuration = await Api.GetScoreConfigurationAsync(SelectedMappingId);
+
+        if (Configuration is null ||
+            !Configuration.ScaleConfigurationId.HasValue)
+        {
+            var mapping = Mappings.FirstOrDefault(
+                x => x.IndustryParameterMappingId == SelectedMappingId);
+
+            if (mapping is null)
+            {
+                Configuration = null;
+                return;
+            }
+
+            Configuration = new ScoreConfigurationDto
+            {
+                IndustryParameterMappingId = SelectedMappingId,
+                ScaleConfigurationId = null,
+                ScaleCode = $"{WorkflowCode}_V{VersionNo}_{mapping.ParameterCode}",
+                ScaleName = string.IsNullOrWhiteSpace(mapping.ParameterDisplayName)
+                    ? mapping.MasterParameterName
+                    : mapping.ParameterDisplayName,
+                MinValue = 0,
+                MaxValue = 0,
+                Scores = []
+            };
+        }
+    }
+
+    // ADD SCORE
+
+    private void AddScore()
+    {
+        if (Configuration is null || IsReadOnly)
+            return;
+
+        var nextScore = Configuration.Scores.Count == 0
+            ? 1
+            : Configuration.Scores.Max(x => x.Score) + 1;
+
+        Configuration.Scores.Add(new ScoreDto
+        {
+            Score = nextScore,
+            Definition = string.Empty,
+            MinValue = null,
+            MaxValue = null,
+            MinInclusive = true,
+            MaxInclusive = true
+        });
+    }
+
+    // REMOVE SCORE
+
+    private void RemoveScore(ScoreDto score)
+    {
+        if (Configuration is null || IsReadOnly)
+            return;
+
+        Configuration.Scores.Remove(score);
+        UpdateOverallRange();
+    }
+
+    // SAVE CONFIGURATION
+
+    private async Task SaveConfiguration()
+    {
+        if (Configuration is null || SelectedMappingId <= 0)
+            return;
+
+        if (IsReadOnly)
+        {
+            Snackbar.Add(
+                "Published and archived versions are read-only.",
+                Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Configuration.ScaleCode))
+        {
+            Snackbar.Add("Scale code is required.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Configuration.ScaleName))
+        {
+            Snackbar.Add("Scale name is required.", Severity.Warning);
+            return;
+        }
+
+        if (Configuration.Scores.Count == 0)
+        {
+            Snackbar.Add("Add at least one score band.", Severity.Warning);
+            return;
+        }
+
+        if (Configuration.Scores.Any(x =>
+            !x.MinValue.HasValue || !x.MaxValue.HasValue))
+        {
+            Snackbar.Add(
+                "Minimum and maximum values are required for every score.",
+                Severity.Warning);
+            return;
+        }
+
+        if (Configuration.Scores.Any(x =>
+            x.MinValue!.Value > x.MaxValue!.Value))
+        {
+            Snackbar.Add(
+                "Minimum value cannot be greater than maximum value.",
+                Severity.Warning);
+            return;
+        }
+
+        var duplicateScores = Configuration.Scores
+            .GroupBy(x => x.Score)
+            .Any(x => x.Count() > 1);
+
+        if (duplicateScores)
+        {
+            Snackbar.Add(
+                "Duplicate score values are not allowed.",
+                Severity.Warning);
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            Configuration.IndustryParameterMappingId = SelectedMappingId;
+
+            UpdateOverallRange();
+
+            var saved = await Api.SaveScoreConfigurationAsync(Configuration);
+
+            if (!saved)
+            {
+                throw new InvalidOperationException(
+                    "The API did not save the score configuration.");
+            }
+
+            Snackbar.Add(
+                "Score configuration saved successfully.",
+                Severity.Success);
+
+            await LoadConfigurationInternal();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Score configuration could not be saved: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    // UPDATE OVERALL MINIMUM AND MAXIMUM
+
+    private void UpdateOverallRange()
+    {
+        if (Configuration is null)
+            return;
+
+        var validScores = Configuration.Scores
+            .Where(x => x.MinValue.HasValue && x.MaxValue.HasValue)
+            .ToList();
+
+        if (validScores.Count == 0)
+        {
+            Configuration.MinValue = 0;
+            Configuration.MaxValue = 0;
+            return;
+        }
+
+        Configuration.MinValue = validScores.Min(x => x.MinValue!.Value);
+        Configuration.MaxValue = validScores.Max(x => x.MaxValue!.Value);
+    }
+}

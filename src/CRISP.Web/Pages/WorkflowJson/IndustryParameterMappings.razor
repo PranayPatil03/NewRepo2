@@ -1,0 +1,517 @@
+
+@page "/workflow-json/mappings"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Industry Parameter Mapping</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Industry Parameter Mapping</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Configure parameters, display names, weights, calculation types and display order
+                    for the selected industry and workflow version.
+                </MudText>
+            </div>
+
+            <div class="admin-button-row">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           Disabled="@Busy"
+                           OnClick="LoadMappings">
+                    Reload
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           Disabled="@(Busy || !CanConfigure || IsPublished)"
+                           OnClick="SaveMappings">
+                    Save Mapping
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Tune"
+                           Disabled="@(Busy || !CanConfigure || IsPublished)"
+                           OnClick="OpenScoreConfiguration">
+                    Score Configuration
+                </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.ListAlt"
+                           Disabled="@(!CanConfigure)"
+                           OnClick="ViewParameters">
+                    View Parameters
+                </MudButton>
+            </div>
+        </div>
+
+        <div class="admin-grid-3">
+            <MudSelect T="int?"
+                       Value="@SelectedIndustryId"
+                       ValueChanged="@ChangeIndustry"
+                       Label="Industry"
+                       Placeholder="Select industry"
+                       Variant="Variant.Outlined"
+                       Clearable="true"
+                       Disabled="@Busy">
+
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)industry.Id)">
+                        @industry.IndustryName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="string"
+                       Value="@WorkflowCode"
+                       ValueChanged="@ChangeWorkflow"
+                       Label="Workflow"
+                       Placeholder="Select workflow"
+                       Variant="Variant.Outlined"
+                       Clearable="true"
+                       Disabled="@(Busy || !SelectedIndustryId.HasValue)">
+
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">
+                        @workflow.WorkflowName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="int?"
+                       Value="@SelectedVersionNo"
+                       ValueChanged="@ChangeVersion"
+                       Label="JSON Version"
+                       Placeholder="Select JSON version"
+                       Variant="Variant.Outlined"
+                       Clearable="true"
+                       Disabled="@(Busy || string.IsNullOrWhiteSpace(WorkflowCode))">
+
+                @foreach (var version in Versions)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)version.VersionNo)">
+                        @($"V{version.VersionNo} - {version.VersionName} ({version.Status})")
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (!CanConfigure)
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-4">
+                Select an industry, workflow and JSON version to configure parameter mappings.
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="my-3">
+                Overall target:
+                <b>@OverallWeightage.ToString("0.##")%</b>
+                · Selected mapping total:
+                <b>@MappedWeight.ToString("0.##")%</b>
+                · Parameters mapped:
+                <b>@Rows.Count(x => x.IsMapped)</b>
+
+                @if (IsPublished)
+                {
+                    <span> · This version is published or archived and is read-only.</span>
+                }
+            </MudAlert>
+
+            @if (Rows.Count == 0)
+            {
+                <MudAlert Severity="Severity.Warning">
+                    No parameter mappings found for this industry and version.
+                    Check the parameter master and configure the mapping.
+                </MudAlert>
+            }
+            else
+            {
+                <MudTable Items="Rows"
+                          Dense="true"
+                          Hover="true"
+                          Class="admin-table">
+
+                    <HeaderContent>
+                        <MudTh>Use</MudTh>
+                        <MudTh>Code</MudTh>
+                        <MudTh>Master Parameter</MudTh>
+                        <MudTh>Display Name</MudTh>
+                        <MudTh>Weight %</MudTh>
+                        <MudTh>Calculation</MudTh>
+                        <MudTh>Scale ID</MudTh>
+                        <MudTh>Order</MudTh>
+                    </HeaderContent>
+
+                    <RowTemplate>
+                        <MudTd>
+                            <MudCheckBox T="bool"
+                                         @bind-Value="context.IsMapped"
+                                         Disabled="@IsPublished" />
+                        </MudTd>
+
+                        <MudTd>@context.ParameterCode</MudTd>
+
+                        <MudTd>@context.MasterParameterName</MudTd>
+
+                        <MudTd>
+                            <MudTextField T="string"
+                                          @bind-Value="context.ParameterDisplayName"
+                                          Margin="Margin.Dense"
+                                          Variant="Variant.Outlined"
+                                          Disabled="@IsPublished" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudNumericField T="decimal"
+                                             @bind-Value="context.Weight"
+                                             Margin="Margin.Dense"
+                                             Variant="Variant.Outlined"
+                                             Min="0"
+                                             Disabled="@(!context.IsMapped || IsPublished)" />
+                        </MudTd>
+
+                        <MudTd>
+                            <MudSelect T="string"
+                                       @bind-Value="context.ValueType"
+                                       Label="Calculation"
+                                       Variant="Variant.Outlined"
+                                       Margin="Margin.Dense"
+                                       Disabled="@(!context.IsMapped || IsPublished)">
+
+                                <MudSelectItem T="string" Value="@("ManualScore")">
+                                    Manual score
+                                </MudSelectItem>
+
+                                <MudSelectItem T="string" Value="@("Value")">
+                                    Value-based
+                                </MudSelectItem>
+                            </MudSelect>
+                        </MudTd>
+
+                        <MudTd>
+                            @(context.ScaleConfigurationId?.ToString() ?? "Not configured")
+                        </MudTd>
+
+                        <MudTd>
+                            <MudNumericField T="int"
+                                             @bind-Value="context.DisplayOrder"
+                                             Margin="Margin.Dense"
+                                             Variant="Variant.Outlined"
+                                             Min="1"
+                                             Disabled="@(!context.IsMapped || IsPublished)" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private List<VersionDto> Versions = [];
+    private List<IndustryParameterMappingDto> Rows = [];
+
+    private int? SelectedIndustryId;
+    private int? SelectedVersionNo;
+    private string WorkflowCode = string.Empty;
+
+    private int IndustryId => SelectedIndustryId ?? 0;
+    private int VersionNo => SelectedVersionNo ?? 0;
+
+    private IEnumerable<WorkflowDto> IndustryWorkflows =>
+        Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+
+    private decimal OverallWeightage = 100m;
+    private bool Busy;
+
+    private bool CanConfigure =>
+        SelectedIndustryId.HasValue &&
+        SelectedVersionNo.HasValue &&
+        !string.IsNullOrWhiteSpace(WorkflowCode);
+
+    private bool IsPublished =>
+        Versions.FirstOrDefault(x => x.VersionNo == VersionNo) is { } version
+        && (
+            version.IsPublished ||
+            version.Status.Equals("Published", StringComparison.OrdinalIgnoreCase) ||
+            version.Status.Equals("Archived", StringComparison.OrdinalIgnoreCase) ||
+            version.Status.Equals("Archieve", StringComparison.OrdinalIgnoreCase)
+        );
+
+    private decimal MappedWeight =>
+        Rows.Where(x => x.IsMapped).Sum(x => x.Weight);
+
+    [SupplyParameterFromQuery(Name = "industryId")]
+    public int? QueryIndustryId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "workflowCode")]
+    public string? QueryWorkflowCode { get; set; }
+
+    [SupplyParameterFromQuery(Name = "versionNo")]
+    public int? QueryVersionNo { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Busy = true;
+
+            Industries = (await Api.GetAllIndustriesAsync())
+                .OrderBy(x => x.IndustryName)
+                .ToList();
+
+            Workflows = await Api.GetWorkflowsAsync();
+
+            // Query-string selections are allowed only when valid.
+            // Otherwise all dropdowns start with placeholders.
+            SelectedIndustryId =
+                QueryIndustryId.HasValue &&
+                Industries.Any(x => x.Id == QueryIndustryId.Value)
+                    ? QueryIndustryId
+                    : null;
+
+            WorkflowCode =
+                !string.IsNullOrWhiteSpace(QueryWorkflowCode) &&
+                IndustryWorkflows.Any(x => x.WorkflowCode == QueryWorkflowCode)
+                    ? QueryWorkflowCode!
+                    : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(WorkflowCode))
+            {
+                await LoadVersions();
+
+                SelectedVersionNo =
+                    QueryVersionNo.HasValue &&
+                    Versions.Any(x => x.VersionNo == QueryVersionNo.Value)
+                        ? QueryVersionNo
+                        : null;
+
+                if (SelectedVersionNo.HasValue)
+                    await LoadMappings();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Mapping options could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private Task ChangeIndustry(int? value)
+    {
+        SelectedIndustryId = value;
+
+        // Reset dependent selections.
+        WorkflowCode = string.Empty;
+        SelectedVersionNo = null;
+        Versions = [];
+        Rows = [];
+        OverallWeightage = 100m;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        WorkflowCode = value ?? string.Empty;
+
+        SelectedVersionNo = null;
+        Versions = [];
+        Rows = [];
+        OverallWeightage = 100m;
+
+        if (string.IsNullOrWhiteSpace(WorkflowCode) ||
+            !SelectedIndustryId.HasValue)
+        {
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            await LoadVersions();
+
+            // Do not automatically select a version.
+            // The user explicitly chooses one.
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Versions could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task LoadVersions()
+    {
+        Versions = (await Api.GetVersionsAsync(WorkflowCode))
+            .OrderByDescending(x => x.VersionNo)
+            .ToList();
+    }
+
+    private async Task ChangeVersion(int? value)
+    {
+        SelectedVersionNo = value;
+        Rows = [];
+        OverallWeightage = 100m;
+
+        if (!SelectedVersionNo.HasValue)
+            return;
+
+        await LoadMappings();
+    }
+
+    private async Task LoadMappings()
+    {
+        if (!CanConfigure)
+        {
+            Rows = [];
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            var version = Versions.FirstOrDefault(
+                x => x.VersionNo == VersionNo);
+
+            OverallWeightage =
+                version is not null && version.OverallWeightage > 0
+                    ? version.OverallWeightage
+                    : 100m;
+
+            Rows = await Api.GetIndustryParameterMappingsAsync(
+                WorkflowCode,
+                VersionNo,
+                IndustryId);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Mappings could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task SaveMappings()
+    {
+        if (!CanConfigure || IsPublished || Busy)
+            return;
+
+        if (!Rows.Any(x => x.IsMapped))
+        {
+            Snackbar.Add(
+                "Select at least one parameter to map.",
+                Severity.Warning);
+            return;
+        }
+
+        if (Rows.Where(x => x.IsMapped).Any(x =>
+                string.IsNullOrWhiteSpace(x.ParameterDisplayName) ||
+                x.Weight < 0 ||
+                x.DisplayOrder < 1))
+        {
+            Snackbar.Add(
+                "Mapped parameters need a display name, a valid weight and an order of at least 1.",
+                Severity.Warning);
+            return;
+        }
+
+        if (Math.Abs(MappedWeight - OverallWeightage) > 0.01m)
+        {
+            Snackbar.Add(
+                $"Weight total is {MappedWeight:0.##}%. It must equal {OverallWeightage:0.##}%.",
+                Severity.Warning);
+            return;
+        }
+
+        Busy = true;
+
+        try
+        {
+            var ok = await Api.SaveIndustryParameterMappingsAsync(
+                new SaveIndustryParameterMappingsRequest
+                {
+                    WorkflowCode = WorkflowCode,
+                    VersionNo = VersionNo,
+                    IndustryDetailsId = IndustryId,
+                    Mappings = Rows
+                });
+
+            if (ok)
+            {
+                Snackbar.Add(
+                    "Industry parameter mappings saved successfully.",
+                    Severity.Success);
+
+                await LoadMappings();
+            }
+            else
+            {
+                Snackbar.Add(
+                    "The API did not confirm that the mappings were saved.",
+                    Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Mappings could not be saved: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private void OpenScoreConfiguration()
+    {
+        if (!CanConfigure || IsPublished)
+            return;
+
+        Navigation.NavigateTo(
+            $"/workflow-json/score-configuration" +
+            $"?workflowCode={Uri.EscapeDataString(WorkflowCode)}" +
+            $"&versionNo={VersionNo}" +
+            $"&industryId={IndustryId}");
+    }
+
+    private void ViewParameters()
+    {
+        if (!CanConfigure)
+            return;
+
+        Navigation.NavigateTo(
+            $"/workflow-json/parameters" +
+            $"?industryId={IndustryId}" +
+            $"&workflowCode={Uri.EscapeDataString(WorkflowCode)}" +
+            $"&versionNo={VersionNo}");
+    }
+}

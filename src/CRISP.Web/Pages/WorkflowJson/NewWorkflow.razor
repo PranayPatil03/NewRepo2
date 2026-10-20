@@ -1,0 +1,104 @@
+@page "/workflow-json/new"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / New Workflow</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Create New Workflow</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Select the industry first. Each industry can have its own workflows and independent versions.
+                </MudText>
+            </div>
+        </div>
+
+        <div class="admin-grid-3">
+            <MudSelect T="int" @bind-Value="IndustryDetailsId" Label="Industry" Variant="Variant.Outlined" Required="true">
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int" Value="@industry.Id">@industry.IndustryName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="WorkflowCode"
+                          Label="Workflow Code"
+                          Variant="Variant.Outlined"
+                          Required="true" />
+
+            <MudTextField @bind-Value="WorkflowName"
+                          Label="Workflow Name"
+                          Variant="Variant.Outlined"
+                          Required="true" />
+        </div>
+
+        <div class="editor-actions">
+            <MudButton Variant="Variant.Text"
+                       OnClick="Cancel">
+                Cancel
+            </MudButton>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="Create">
+                Create Workflow
+            </MudButton>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    private string WorkflowCode = string.Empty;
+    private string WorkflowName = string.Empty;
+    private int IndustryDetailsId;
+    private List<IndustrySegmentDto> Industries = [];
+    [SupplyParameterFromQuery(Name = "industryId")] public int? QueryIndustryId { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Industries = (await Api.GetAllIndustriesAsync()).OrderBy(x => x.IndustryName).ToList();
+        IndustryDetailsId = QueryIndustryId.HasValue && Industries.Any(x => x.Id == QueryIndustryId.Value)
+            ? QueryIndustryId.Value : 0;
+    }
+
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/workflow-json");
+    }
+
+    private async Task Create()
+    {
+        if (IndustryDetailsId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode) || string.IsNullOrWhiteSpace(WorkflowName))
+        {
+            Snackbar.Add("Workflow code and workflow name are required.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            var workflow = await Api.CreateWorkflowAsync(
+                new CreateWorkflowRequest
+                {
+                    IndustryDetailsId = IndustryDetailsId,
+                    WorkflowCode = WorkflowCode.Trim(),
+                    WorkflowName = WorkflowName.Trim()
+                });
+
+            if (workflow is null)
+            {
+                Snackbar.Add("Workflow could not be created.", Severity.Error);
+                return;
+            }
+
+            Snackbar.Add("Workflow created with Draft Version 1. Configure its parameters, scales, rules and validations before publishing.", Severity.Success);
+            Navigation.NavigateTo($"/workflow-json?industryId={IndustryDetailsId}&workflowCode={Uri.EscapeDataString(workflow.WorkflowCode)}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Workflow could not be created: {ex.Message}", Severity.Error);
+        }
+    }
+}

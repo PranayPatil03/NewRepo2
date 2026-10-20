@@ -1,0 +1,93 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="@Theme" IsDarkMode="false" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+
+<div class="icra-shell">
+    <aside class="icra-sidebar">
+        <div class="icra-brand">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Size="Size.Medium" Color="Color.Default" />
+            <div class="icra-logo">
+                <span class="logo-emblem">R</span>
+                <span>ICRA</span>
+            </div>
+        </div>
+
+        <nav class="icra-nav">
+            <div class="nav-section">
+                <span>Financial Information</span>
+                <MudIcon Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" />
+            </div>
+
+            <div class="nav-section open">
+                <span>Credit Rating Framework</span>
+                <MudIcon Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" />
+            </div>
+
+            <div class="nav-link nav-parent">
+                <MudIcon Icon="@Icons.Material.Filled.DataObject" />
+                <span>Workflow JSON</span>
+                <MudIcon Class="nav-end" Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" />
+            </div>
+            <NavLink href="/workflow-json" class="nav-child">Manage JSON</NavLink>
+            <NavLink href="/workflow-json/parameters" class="nav-child">Parameters</NavLink>
+            <NavLink href="/workflow-json/parameter-master" class="nav-child">Parameter Master</NavLink>
+            <NavLink href="/workflow-json/mappings" class="nav-child">Industry Parameter Mapping</NavLink>
+            <NavLink href="/workflow-json/rules" class="nav-child">Rules</NavLink>
+            <NavLink href="/workflow-json/validations" class="nav-child">Validations</NavLink>
+            <NavLink href="/workflow-json/evaluate" class="nav-child">Evaluate</NavLink>
+
+            <div class="nav-link nav-parent">
+                <MudIcon Icon="@Icons.Material.Filled.FolderOpen" />
+                <span>Create/View Framework</span>
+                <MudIcon Class="nav-end" Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" />
+            </div>
+            <NavLink href="/crf/corporate" class="nav-child">Corporate</NavLink>
+            <NavLink href="/crf/financial" class="nav-child">Financial</NavLink>
+            <NavLink href="/crf/investment-company" class="nav-child">Investment Company</NavLink>
+            <NavLink href="/crf/public-finance" class="nav-child">Public Finance</NavLink>
+
+            <div class="nav-link">
+                <MudIcon Icon="@Icons.Material.Filled.ShowChart" />
+                <span>Report Generation</span>
+                <MudIcon Class="nav-end" Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" />
+            </div>
+
+            <div class="nav-link">
+                <MudIcon Icon="@Icons.Material.Filled.Schedule" />
+                <span>Rating Tracker</span>
+                <MudIcon Class="nav-end" Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" />
+            </div>
+        </nav>
+    </aside>
+
+    <main class="icra-main">
+        <header class="icra-topbar">
+            <div class="top-spacer"></div>
+            <MudIconButton Icon="@Icons.Material.Filled.AccountCircle" Color="Color.Default" />
+            <span class="user-name">Pranay Patil</span>
+            <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" />
+        </header>
+
+        <section class="icra-content">
+            @Body
+        </section>
+
+        <footer class="icra-footer">
+            Copyright © 2026 ICRA Limited. All Rights Reserved
+        </footer>
+    </main>
+</div>
+
+@code {
+    private MudTheme Theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#174ea6",
+            Secondary = "#174ea6"
+        }
+    };
+}

@@ -1,0 +1,258 @@
+@page "/workflow-json/rules"
+@page "/rules"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Rules</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Rules</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Rules are master data stored in the database and published into workflow JSON for the Rules Engine.
+                </MudText>
+            </div>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Disabled="string.IsNullOrWhiteSpace(WorkflowCode)"
+                       OnClick="AddRule">
+                Add Rule
+            </MudButton>
+        </div>
+
+        <div class="admin-grid-2 mb-4">
+            <MudSelect T="int" Value="IndustryId" ValueChanged="ChangeIndustry" Label="Industry" Variant="Variant.Outlined">
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int" Value="@industry.Id">@industry.IndustryName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Value="WorkflowCode" ValueChanged="ChangeWorkflow" Label="Workflow" Variant="Variant.Outlined" Disabled="@(IndustryId <= 0)">
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">@workflow.WorkflowName</MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (Definition is not null)
+        {
+            <MudTable Items="Definition.Rules"
+                      Dense="true"
+                      Hover="true"
+                      Class="admin-table">
+                <HeaderContent>
+                    <MudTh>Rule</MudTh>
+                    <MudTh>Condition</MudTh>
+                    <MudTh>Output Expression</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+
+                <RowTemplate>
+                    <MudTd>@context.RuleName</MudTd>
+                    <MudTd>
+                        <code>@context.Expression</code>
+                    </MudTd>
+                    <MudTd>
+                        <code>@context.OutputExpression</code>
+                    </MudTd>
+                    <MudTd>
+                        <MudButton Size="Size.Small"
+                                   Variant="Variant.Outlined"
+                                   OnClick="() => EditRule(context)">
+                            Edit
+                        </MudButton>
+
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                       Color="Color.Error"
+                                       OnClick="() => DeleteRule(context)" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            @if (Editing is not null)
+            {
+                <div class="editor-panel">
+                    <MudText Typo="Typo.h6">Rule Definition</MudText>
+
+                    <MudTextField @bind-Value="Editing.RuleName"
+                                  Label="Rule Name"
+                                  Variant="Variant.Outlined" />
+
+                    <MudTextField @bind-Value="Editing.Expression"
+                                  Label="Condition Expression"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-3" />
+
+                    <MudTextField @bind-Value="Editing.OutputExpression"
+                                  Label="Output Expression"
+                                  Lines="4"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-3" />
+
+                    <MudText Typo="Typo.caption" Class="muted mt-2">
+                        Example: input1.Value &gt; 30
+                    </MudText>
+
+                    <div class="editor-actions">
+                        <MudButton Variant="Variant.Text"
+                                   OnClick="CancelEdit">
+                            Cancel
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   OnClick="SaveRule">
+                            Save Rule
+                        </MudButton>
+                    </div>
+                </div>
+            }
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private int IndustryId;
+    private IEnumerable<WorkflowDto> IndustryWorkflows => Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+    private string WorkflowCode = string.Empty;
+    private WorkflowDefinitionDto? Definition;
+    private WorkflowJsonRuleDto? Editing;
+    private string? EditingOriginalName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Industries = (await Api.GetAllIndustriesAsync()).OrderBy(x => x.IndustryName).ToList();
+        Workflows = await Api.GetWorkflowsAsync();
+        // Require the user to choose industry first, then a workflow belonging to it.
+        IndustryId = 0;
+        WorkflowCode = string.Empty;
+        Definition = null;
+    }
+
+    private Task ChangeIndustry(int value)
+    {
+        IndustryId = value;
+        WorkflowCode = string.Empty;
+        Definition = null;
+        Editing = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        WorkflowCode = value;
+        Editing = null;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        Definition = string.IsNullOrWhiteSpace(WorkflowCode)
+            ? null
+            : await Api.GetWorkflowDefinitionAsync(WorkflowCode);
+    }
+
+    private void AddRule()
+    {
+        EditingOriginalName = null;
+        Editing = new WorkflowJsonRuleDto
+        {
+            RuleName = string.Empty,
+            Expression = "true",
+            OutputExpression = "0"
+        };
+    }
+
+    private void EditRule(WorkflowJsonRuleDto rule)
+    {
+        EditingOriginalName = rule.RuleName;
+        Editing = System.Text.Json.JsonSerializer.Deserialize<WorkflowJsonRuleDto>(
+            System.Text.Json.JsonSerializer.Serialize(rule));
+    }
+
+    private void CancelEdit()
+    {
+        Editing = null;
+        EditingOriginalName = null;
+    }
+
+    private async Task DeleteRule(WorkflowJsonRuleDto rule)
+    {
+        if (Definition is null)
+            return;
+
+        Definition.Rules.Remove(rule);
+        await SaveDefinition("Rule deleted.");
+    }
+
+    private async Task SaveRule()
+    {
+        if (Definition is null || Editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(Editing.RuleName)
+            || string.IsNullOrWhiteSpace(Editing.Expression))
+        {
+            Snackbar.Add("Rule name and expression are required.", Severity.Warning);
+            return;
+        }
+
+        var duplicate = Definition.Rules.Any(x =>
+            !string.Equals(x.RuleName, EditingOriginalName, StringComparison.OrdinalIgnoreCase)
+            && x.RuleName.Equals(Editing.RuleName, StringComparison.OrdinalIgnoreCase));
+
+        if (duplicate)
+        {
+            Snackbar.Add("Rule name already exists.", Severity.Warning);
+            return;
+        }
+
+        var existing = string.IsNullOrWhiteSpace(EditingOriginalName)
+            ? null
+            : Definition.Rules.FirstOrDefault(x =>
+                x.RuleName.Equals(EditingOriginalName, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            Definition.Rules.Add(Editing);
+        }
+        else
+        {
+            var index = Definition.Rules.IndexOf(existing);
+            Definition.Rules[index] = Editing;
+        }
+
+        await SaveDefinition("Rule saved.");
+        Editing = null;
+        EditingOriginalName = null;
+    }
+
+    private async Task SaveDefinition(string message)
+    {
+        var result = await Api.SaveWorkflowDefinitionAsync(
+            new SaveWorkflowDefinitionRequest
+            {
+                WorkflowCode = WorkflowCode,
+                VersionName = $"{DateTime.Today:dd-MMM-yyyy} - Draft",
+                Status = "Draft",
+                IsPublished = false,
+                Definition = Definition!
+            });
+
+        if (result is not null)
+        {
+            Snackbar.Add(
+                $"{message} Version {result.VersionNo} created.",
+                Severity.Success);
+        }
+
+        await Load();
+    }
+}

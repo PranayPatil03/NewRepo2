@@ -1,0 +1,404 @@
+
+@page "/workflow-json/evaluate"
+@page "/evaluate"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Evaluate</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Evaluate Workflow</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Test the selected published workflow using the same Rules Engine used by the Corporate framework.
+                </MudText>
+            </div>
+        </div>
+
+        <div class="admin-grid-2">
+            <MudSelect T="int?"
+                       Value="@SelectedIndustryId"
+                       ValueChanged="@ChangeIndustry"
+                       Label="Industry"
+                       Placeholder="Select industry"
+                       Variant="Variant.Outlined"
+                       Clearable="true"
+                       Disabled="@IsLoadingData">
+
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)industry.Id)">
+                        @industry.IndustryName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="string"
+                       Value="@WorkflowCode"
+                       ValueChanged="@ChangeWorkflow"
+                       Label="Workflow"
+                       Placeholder="Select workflow"
+                       Variant="Variant.Outlined"
+                       Disabled="@(IsLoadingData || !SelectedIndustryId.HasValue)"
+                       Clearable="true">
+
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">
+                        @workflow.WorkflowName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (IsLoadingData)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mt-4" />
+        }
+        else if (SelectedIndustryId.HasValue &&
+                 !string.IsNullOrWhiteSpace(WorkflowCode) &&
+                 Parameters.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-4">
+                No parameters are available for the selected workflow.
+                Configure the industry parameter mappings first.
+            </MudAlert>
+        }
+        else if (SelectedIndustryId.HasValue &&
+                 !string.IsNullOrWhiteSpace(WorkflowCode) &&
+                 Parameters.Count > 0)
+        {
+            <MudTable Items="Parameters"
+                      Dense="true"
+                      Hover="true"
+                      Class="admin-table mt-4">
+
+                <HeaderContent>
+                    <MudTh>Parameter</MudTh>
+                    <MudTh>Weight (%)</MudTh>
+                    <MudTh>Value</MudTh>
+                    <MudTh>Manual Score</MudTh>
+                </HeaderContent>
+
+                <RowTemplate>
+                    <MudTd>@context.ParameterName</MudTd>
+
+                    <MudTd>@context.Weight.ToString("0.##")</MudTd>
+
+                    <MudTd>
+                        @if (context.IsValueDriven)
+                        {
+                            <MudNumericField T="decimal?"
+                                             Value="@GetValue(context.Id)"
+                                             ValueChanged="@((decimal? value) => SetValue(context.Id, value))"
+                                             Variant="Variant.Outlined"
+                                             Margin="Margin.Dense" />
+                        }
+                        else
+                        {
+                            <span>-</span>
+                        }
+                    </MudTd>
+
+                    <MudTd>
+                        @if (context.IsValueDriven)
+                        {
+                            <span>@GetScore(context.Id)</span>
+                        }
+                        else
+                        {
+                            <MudSelect T="int"
+                                       Value="@GetScore(context.Id)"
+                                       ValueChanged="@((int value) => SetScore(context.Id, value))"
+                                       Label="Select score"
+                                       Placeholder="Select score"
+                                       Variant="Variant.Outlined"
+                                       Margin="Margin.Dense">
+
+                                @foreach (var score in context.Scores.OrderBy(x => x.Score))
+                                {
+                                    <MudSelectItem T="int" Value="@score.Score">
+                                        @score.Score
+                                    </MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            <div class="editor-actions">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           Disabled="@(VersionNo <= 0 || Evaluating || IsLoadingData)"
+                           OnClick="RunEvaluationAsync">
+                    @(Evaluating ? "Evaluating..." : "Run Evaluation")
+                </MudButton>
+            </div>
+        }
+
+        @if (Result is not null)
+        {
+            <MudAlert Severity="@(Result.Success ? Severity.Success : Severity.Error)"
+                      Class="mt-4">
+                @Result.Message
+                <br />
+                Weighted Average Score:
+                <b>@Result.WeightedAverageScore.ToString("0.00")</b>
+                <br />
+                Formula: <code>@Result.Formula</code>
+            </MudAlert>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private List<VersionDto> Versions = [];
+    private List<ParameterDto> Parameters = [];
+
+    private int? SelectedIndustryId;
+    private int IndustryId => SelectedIndustryId ?? 0;
+
+    private IEnumerable<WorkflowDto> IndustryWorkflows =>
+        Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+
+    private string WorkflowCode = string.Empty;
+    private int VersionNo;
+
+    private bool Evaluating;
+    private bool IsLoadingData;
+
+    private readonly Dictionary<int, decimal?> Values = new();
+    private readonly Dictionary<int, int> Scores = new();
+
+    private EvaluateResponse? Result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            IsLoadingData = true;
+
+            Industries = (await Api.GetAllIndustriesAsync())
+                .OrderBy(x => x.IndustryName)
+                .ToList();
+
+            Workflows = await Api.GetWorkflowsAsync();
+
+            // Intentionally do not select the first industry or workflow.
+            SelectedIndustryId = null;
+            WorkflowCode = string.Empty;
+            Versions = [];
+            Parameters = [];
+            VersionNo = 0;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Industry and workflow options could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            IsLoadingData = false;
+        }
+    }
+
+    private Task ChangeIndustry(int? value)
+    {
+        SelectedIndustryId = value;
+
+        // Clear all selections and evaluation data belonging
+        // to the previous industry.
+        WorkflowCode = string.Empty;
+        Versions = [];
+        Parameters = [];
+        VersionNo = 0;
+
+        Values.Clear();
+        Scores.Clear();
+        Result = null;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        WorkflowCode = value ?? string.Empty;
+
+        Versions = [];
+        Parameters = [];
+        VersionNo = 0;
+
+        Values.Clear();
+        Scores.Clear();
+        Result = null;
+
+        if (string.IsNullOrWhiteSpace(WorkflowCode) ||
+            !SelectedIndustryId.HasValue)
+        {
+            return;
+        }
+
+        await LoadWorkflowData();
+    }
+
+    private async Task LoadWorkflowData()
+    {
+        if (string.IsNullOrWhiteSpace(WorkflowCode) ||
+            !SelectedIndustryId.HasValue)
+        {
+            return;
+        }
+
+        IsLoadingData = true;
+
+        try
+        {
+            var parametersTask = Api.GetParametersAsync(WorkflowCode);
+            var versionsTask = Api.GetVersionsAsync(WorkflowCode);
+
+            await Task.WhenAll(parametersTask, versionsTask);
+
+            Parameters = (await parametersTask)
+                .OrderBy(x => x.DisplayOrder)
+                .ToList();
+
+            Versions = (await versionsTask)
+                .OrderByDescending(x => x.VersionNo)
+                .ToList();
+
+            // Evaluation uses the published version only.
+            VersionNo = Versions
+                .Where(x =>
+                    x.IsPublished ||
+                    x.Status.Equals(
+                        "Published",
+                        StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.VersionNo)
+                .FirstOrDefault()?.VersionNo ?? 0;
+
+            Values.Clear();
+            Scores.Clear();
+            Result = null;
+
+            foreach (var parameter in Parameters)
+            {
+                Values[parameter.Id] = null;
+
+                Scores[parameter.Id] =
+                    parameter.Scores
+                        .OrderBy(x => x.Score)
+                        .FirstOrDefault()?.Score ?? 0;
+            }
+
+            if (VersionNo <= 0)
+            {
+                Snackbar.Add(
+                    "No published version exists for this workflow.",
+                    Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Parameters = [];
+            Versions = [];
+            VersionNo = 0;
+
+            Snackbar.Add(
+                $"Workflow data could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            IsLoadingData = false;
+        }
+    }
+
+    private decimal? GetValue(int id) =>
+        Values.TryGetValue(id, out var value) ? value : null;
+
+    private int GetScore(int id) =>
+        Scores.TryGetValue(id, out var score) ? score : 0;
+
+    private void SetValue(int id, decimal? value)
+    {
+        Values[id] = value;
+
+        var parameter = Parameters.FirstOrDefault(x => x.Id == id);
+
+        if (parameter is null || !value.HasValue)
+            return;
+
+        var definition = parameter.Scores
+            .Where(x =>
+                (!x.MinValue.HasValue ||
+                 (x.MinInclusive
+                     ? value.Value >= x.MinValue.Value
+                     : value.Value > x.MinValue.Value))
+                &&
+                (!x.MaxValue.HasValue ||
+                 (x.MaxInclusive
+                     ? value.Value <= x.MaxValue.Value
+                     : value.Value < x.MaxValue.Value)))
+            .OrderBy(x => x.Score)
+            .FirstOrDefault();
+
+        Scores[id] = definition?.Score ?? 0;
+    }
+
+    private void SetScore(int id, int score)
+    {
+        Scores[id] = score;
+    }
+
+    private async Task RunEvaluationAsync()
+    {
+        if (VersionNo <= 0)
+        {
+            Snackbar.Add(
+                "Select a workflow with a published version.",
+                Severity.Warning);
+            return;
+        }
+
+        Evaluating = true;
+
+        try
+        {
+            var values = Parameters
+                .Where(x => x.IsValueDriven)
+                .ToDictionary(
+                    x => x.ParameterCode,
+                    x => GetValue(x.Id),
+                    StringComparer.OrdinalIgnoreCase);
+
+            var manualScores = Parameters
+                .Where(x => !x.IsValueDriven)
+                .ToDictionary(
+                    x => x.ParameterCode,
+                    x => GetScore(x.Id),
+                    StringComparer.OrdinalIgnoreCase);
+
+            Result = await Api.EvaluateAsync(
+                new EvaluateRequest(
+                    WorkflowCode,
+                    VersionNo,
+                    values,
+                    manualScores));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            Evaluating = false;
+        }
+    }
+}

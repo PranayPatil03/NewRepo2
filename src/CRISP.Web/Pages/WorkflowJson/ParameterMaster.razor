@@ -1,0 +1,258 @@
+
+@page "/workflow-json/parameter-master"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Parameter Master</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Shared Parameter Master</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Maintain reusable parameter definitions here.
+                    Weights, display names and display order belong to Industry Parameter Mapping.
+                </MudText>
+            </div>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@Saving"
+                       OnClick="@Add">
+                Add Parameter
+            </MudButton>
+        </div>
+
+        <MudTextField T="string"
+                      @bind-Value="Search"
+                      Label="Search"
+                      Placeholder="Search parameter code or name"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Clearable="true"
+                      Class="mb-3" />
+
+        <MudTable Items="Filtered"
+                  Dense="true"
+                  Hover="true"
+                  Class="admin-table">
+
+            <HeaderContent>
+                <MudTh>Code</MudTh>
+                <MudTh>Master Name</MudTh>
+                <MudTh>Value Driven</MudTh>
+                <MudTh>Active</MudTh>
+                <MudTh>Action</MudTh>
+            </HeaderContent>
+
+            <RowTemplate>
+                <MudTd>@context.ParameterCode</MudTd>
+                <MudTd>@context.ParameterName</MudTd>
+                <MudTd>@(context.IsValueDriven ? "Yes" : "No")</MudTd>
+                <MudTd>@(context.IsActive ? "Yes" : "No")</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small"
+                               Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Edit"
+                               OnClick="@(() => Edit(context))">
+                        Edit
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+
+            <NoRecordsContent>
+                <MudText Class="pa-4 muted">
+                    No parameters found. Add a parameter or change your search.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+
+        @if (Editing is not null)
+        {
+            <div class="editor-panel">
+                <MudText Typo="Typo.h6">
+                    @(Editing.Id == 0
+                        ? "New Master Parameter"
+                        : "Edit Master Parameter")
+                </MudText>
+
+                <div class="admin-grid-2">
+                    <MudTextField T="string"
+                                  @bind-Value="Editing.ParameterCode"
+                                  Label="Parameter Code"
+                                  Placeholder="Enter parameter code"
+                                  Variant="Variant.Outlined"
+                                  Disabled="@(Editing.Id > 0)" />
+
+                    <MudTextField T="string"
+                                  @bind-Value="Editing.ParameterName"
+                                  Label="Master Parameter Name"
+                                  Placeholder="Enter parameter name"
+                                  Variant="Variant.Outlined" />
+                </div>
+
+                <MudTextField T="string"
+                              @bind-Value="Editing.WhyItMatters"
+                              Label="Why It Matters"
+                              Placeholder="Explain why this parameter matters"
+                              Lines="3"
+                              Variant="Variant.Outlined"
+                              Class="mt-3" />
+
+                <MudTextField T="string"
+                              @bind-Value="Editing.HowDoWeMeasure"
+                              Label="How Do We Measure"
+                              Placeholder="Explain how this parameter is measured"
+                              Lines="3"
+                              Variant="Variant.Outlined"
+                              Class="mt-3" />
+
+                <MudCheckBox T="bool"
+                             @bind-Value="Editing.IsValueDriven">
+                    Value Driven
+                </MudCheckBox>
+
+                <MudCheckBox T="bool"
+                             @bind-Value="Editing.IsActive">
+                    Active
+                </MudCheckBox>
+
+                <div class="editor-actions">
+                    <MudButton Variant="Variant.Text"
+                               Disabled="@Saving"
+                               OnClick="@Cancel">
+                        Cancel
+                    </MudButton>
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Success"
+                               StartIcon="@Icons.Material.Filled.Save"
+                               Disabled="@Saving"
+                               OnClick="@Save">
+                        @(Saving ? "Saving..." : "Save Master Parameter")
+                    </MudButton>
+                </div>
+            </div>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<ParameterDto> Parameters = [];
+    private string Search = string.Empty;
+    private ParameterDto? Editing;
+    private bool Saving;
+
+    private IEnumerable<ParameterDto> Filtered =>
+        Parameters.Where(x =>
+            string.IsNullOrWhiteSpace(Search) ||
+            (x.ParameterCode?.Contains(
+                Search,
+                StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (x.ParameterName?.Contains(
+                Search,
+                StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            Parameters = await Api.GetParameterMastersAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Parameters could not be loaded: {ex.Message}",
+                Severity.Error);
+        }
+    }
+
+    private void Add()
+    {
+        Editing = new ParameterDto
+        {
+            IsActive = true,
+            IsValueDriven = false,
+            Scores = []
+        };
+    }
+
+    private void Edit(ParameterDto item)
+    {
+        Editing = new ParameterDto(
+            item.Id,
+            item.ParameterCode,
+            item.ParameterName,
+            item.WhyItMatters,
+            item.HowDoWeMeasure,
+            0m,
+            0,
+            item.IsValueDriven,
+            [])
+        {
+            IsActive = item.IsActive
+        };
+    }
+
+    private void Cancel()
+    {
+        if (Saving)
+            return;
+
+        Editing = null;
+    }
+
+    private async Task Save()
+    {
+        if (Editing is null || Saving)
+            return;
+
+        if (string.IsNullOrWhiteSpace(Editing.ParameterCode) ||
+            string.IsNullOrWhiteSpace(Editing.ParameterName))
+        {
+            Snackbar.Add(
+                "Parameter code and master name are required.",
+                Severity.Warning);
+            return;
+        }
+
+        Editing.ParameterCode = Editing.ParameterCode.Trim();
+        Editing.ParameterName = Editing.ParameterName.Trim();
+
+        Saving = true;
+
+        try
+        {
+            var result = await Api.SaveParameterMasterAsync(Editing);
+
+            if (result is null)
+                throw new InvalidOperationException(
+                    "API did not return the saved parameter.");
+
+            Snackbar.Add(
+                "Shared parameter master saved successfully.",
+                Severity.Success);
+
+            Editing = null;
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(
+                $"Parameter could not be saved: {ex.Message}",
+                Severity.Error);
+        }
+        finally
+        {
+            Saving = false;
+        }
+    }
+}

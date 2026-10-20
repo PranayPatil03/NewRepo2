@@ -1,0 +1,372 @@
+
+@page "/workflow-json/validations"
+@page "/validations"
+@rendermode InteractiveServer
+
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Validations</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Validations</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Validation definitions are master data stored in the database and published into workflow JSON.
+                </MudText>
+            </div>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Disabled="@(string.IsNullOrWhiteSpace(WorkflowCode) || Definition is null)"
+                       OnClick="AddValidation">
+                Add Validation
+            </MudButton>
+        </div>
+
+        <div class="admin-grid-2 mb-4">
+            <MudSelect T="int?"
+                       Value="@SelectedIndustryId"
+                       ValueChanged="@ChangeIndustry"
+                       Label="Industry"
+                       Placeholder="Select industry"
+                       Variant="Variant.Outlined"
+                       Clearable="true">
+
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)industry.Id)">
+                        @industry.IndustryName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="string"
+                       Value="@WorkflowCode"
+                       ValueChanged="@ChangeWorkflow"
+                       Label="Workflow"
+                       Placeholder="Select workflow"
+                       Variant="Variant.Outlined"
+                       Clearable="true"
+                       Disabled="@(!SelectedIndustryId.HasValue)">
+
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">
+                        @workflow.WorkflowName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </div>
+
+        @if (!SelectedIndustryId.HasValue)
+        {
+            <MudText Typo="Typo.body2" Class="muted">
+                Select an industry to continue.
+            </MudText>
+        }
+        else if (string.IsNullOrWhiteSpace(WorkflowCode))
+        {
+            <MudText Typo="Typo.body2" Class="muted">
+                Select a workflow to view its validations.
+            </MudText>
+        }
+        else if (Definition is null)
+        {
+            <MudText Typo="Typo.body2" Class="muted">
+                No workflow definition is available.
+            </MudText>
+        }
+        else
+        {
+            <MudTable Items="@Definition.Validations"
+                      Dense="true"
+                      Hover="true"
+                      Class="admin-table">
+
+                <HeaderContent>
+                    <MudTh>Order</MudTh>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Expression</MudTh>
+                    <MudTh>Error Message</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+
+                <RowTemplate>
+                    <MudTd>@context.DisplayOrder</MudTd>
+                    <MudTd>@context.ValidationName</MudTd>
+                    <MudTd>
+                        <code>@context.Expression</code>
+                    </MudTd>
+                    <MudTd>@context.ErrorMessage</MudTd>
+                    <MudTd>
+                        <MudButton Size="Size.Small"
+                                   Variant="Variant.Outlined"
+                                   OnClick="@(() => EditValidation(context))">
+                            Edit
+                        </MudButton>
+
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                       Color="Color.Error"
+                                       OnClick="@(() => DeleteValidation(context))" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+
+            @if (Editing is not null)
+            {
+                <div class="editor-panel">
+                    <MudText Typo="Typo.h6">Validation Definition</MudText>
+
+                    <div class="admin-grid-2">
+                        <MudTextField T="string"
+                                      @bind-Value="Editing.ValidationName"
+                                      Label="Validation Name"
+                                      Variant="Variant.Outlined"
+                                      Required="true" />
+
+                        <MudNumericField T="int"
+                                         @bind-Value="Editing.DisplayOrder"
+                                         Label="Display Order"
+                                         Variant="Variant.Outlined" />
+                    </div>
+
+                    <MudTextField T="string"
+                                  @bind-Value="Editing.Expression"
+                                  Label="Validation Expression"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-3"
+                                  Required="true" />
+
+                    <MudTextField T="string"
+                                  @bind-Value="Editing.ErrorMessage"
+                                  Label="Error Message"
+                                  Variant="Variant.Outlined"
+                                  Class="mt-3" />
+
+                    <div class="editor-actions">
+                        <MudButton Variant="Variant.Text"
+                                   OnClick="CancelEdit">
+                            Cancel
+                        </MudButton>
+
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   OnClick="SaveValidation">
+                            Save Validation
+                        </MudButton>
+                    </div>
+                </div>
+            }
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<IndustrySegmentDto> Industries = [];
+
+    // Nullable selection prevents an initial zero from appearing.
+    private int? SelectedIndustryId { get; set; }
+
+    private int IndustryId => SelectedIndustryId ?? 0;
+
+    private IEnumerable<WorkflowDto> IndustryWorkflows =>
+        SelectedIndustryId.HasValue
+            ? Workflows.Where(x => x.IndustryDetailsId == SelectedIndustryId.Value)
+            : Enumerable.Empty<WorkflowDto>();
+
+    private string WorkflowCode = string.Empty;
+    private WorkflowDefinitionDto? Definition;
+    private WorkflowJsonValidationDto? Editing;
+    private string? EditingOriginalName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Industries = (await Api.GetAllIndustriesAsync())
+            .OrderBy(x => x.IndustryName)
+            .ToList();
+
+        Workflows = await Api.GetWorkflowsAsync();
+
+        SelectedIndustryId = null;
+        WorkflowCode = string.Empty;
+        Definition = null;
+        Editing = null;
+    }
+
+    private Task ChangeIndustry(int? value)
+    {
+        SelectedIndustryId = value;
+        WorkflowCode = string.Empty;
+        Definition = null;
+        Editing = null;
+        EditingOriginalName = null;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        if (!SelectedIndustryId.HasValue)
+            return;
+
+        var selectedWorkflow = IndustryWorkflows
+            .FirstOrDefault(x => x.WorkflowCode == value);
+
+        if (selectedWorkflow is null)
+        {
+            WorkflowCode = string.Empty;
+            Definition = null;
+            Editing = null;
+            EditingOriginalName = null;
+            return;
+        }
+
+        WorkflowCode = selectedWorkflow.WorkflowCode;
+        Editing = null;
+        EditingOriginalName = null;
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        Definition = string.IsNullOrWhiteSpace(WorkflowCode)
+            ? null
+            : await Api.GetWorkflowDefinitionAsync(WorkflowCode);
+    }
+
+    private void AddValidation()
+    {
+        if (Definition is null || string.IsNullOrWhiteSpace(WorkflowCode))
+            return;
+
+        EditingOriginalName = null;
+
+        Editing = new WorkflowJsonValidationDto
+        {
+            ValidationName = string.Empty,
+            Expression = "true",
+            ErrorMessage = "Validation failed.",
+            DisplayOrder = (Definition.Validations?.Count ?? 0) + 1
+        };
+    }
+
+    private void EditValidation(WorkflowJsonValidationDto validation)
+    {
+        EditingOriginalName = validation.ValidationName;
+
+        Editing = System.Text.Json.JsonSerializer
+            .Deserialize<WorkflowJsonValidationDto>(
+                System.Text.Json.JsonSerializer.Serialize(validation));
+    }
+
+    private void CancelEdit()
+    {
+        Editing = null;
+        EditingOriginalName = null;
+    }
+
+    private async Task DeleteValidation(
+        WorkflowJsonValidationDto validation)
+    {
+        if (Definition is null)
+            return;
+
+        Definition.Validations.Remove(validation);
+
+        await SaveDefinition("Validation deleted.");
+    }
+
+    private async Task SaveValidation()
+    {
+        if (Definition is null || Editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(Editing.ValidationName) ||
+            string.IsNullOrWhiteSpace(Editing.Expression))
+        {
+            Snackbar.Add(
+                "Validation name and expression are required.",
+                Severity.Warning);
+
+            return;
+        }
+
+        var duplicate = Definition.Validations.Any(x =>
+            !string.Equals(
+                x.ValidationName,
+                EditingOriginalName,
+                StringComparison.OrdinalIgnoreCase)
+            &&
+            string.Equals(
+                x.ValidationName,
+                Editing.ValidationName,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (duplicate)
+        {
+            Snackbar.Add(
+                "Validation name already exists.",
+                Severity.Warning);
+
+            return;
+        }
+
+        var existing = string.IsNullOrWhiteSpace(EditingOriginalName)
+            ? null
+            : Definition.Validations.FirstOrDefault(x =>
+                string.Equals(
+                    x.ValidationName,
+                    EditingOriginalName,
+                    StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            Definition.Validations.Add(Editing);
+        }
+        else
+        {
+            var index = Definition.Validations.IndexOf(existing);
+
+            if (index >= 0)
+                Definition.Validations[index] = Editing;
+        }
+
+        await SaveDefinition("Validation saved.");
+
+        Editing = null;
+        EditingOriginalName = null;
+    }
+
+    private async Task SaveDefinition(string message)
+    {
+        if (Definition is null ||
+            string.IsNullOrWhiteSpace(WorkflowCode))
+        {
+            return;
+        }
+
+        var result = await Api.SaveWorkflowDefinitionAsync(
+            new SaveWorkflowDefinitionRequest
+            {
+                WorkflowCode = WorkflowCode,
+                VersionName = $"{DateTime.Today:dd-MMM-yyyy} - Draft",
+                Status = "Draft",
+                IsPublished = false,
+                Definition = Definition
+            });
+
+        if (result is not null)
+        {
+            Snackbar.Add(
+                $"{message} Version {result.VersionNo} created.",
+                Severity.Success);
+        }
+
+        await Load();
+    }
+}

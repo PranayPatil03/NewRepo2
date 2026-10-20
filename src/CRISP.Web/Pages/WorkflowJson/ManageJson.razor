@@ -1,0 +1,459 @@
+@page "/workflow-json"
+@page "/versions"
+@rendermode InteractiveServer
+@inject FrameworkApiClient Api
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<div class="admin-page">
+    <div class="crumb">Workflow JSON / Manage JSON</div>
+
+    <MudPaper Class="admin-card" Elevation="0">
+        <div class="admin-title-row">
+            <div>
+                <MudText Typo="Typo.h5">Workflow JSON Version Management</MudText>
+                <MudText Typo="Typo.body2" Class="muted">
+                    Edit a configuration and save it as a new Draft or publish it as a new immutable version.
+                </MudText>
+            </div>
+
+            <div class="admin-button-row">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="CreateWorkflow">
+                    New Workflow
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.NoteAdd"
+                           Disabled="@(IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode))"
+                           OnClick="NewDraft">
+                    New Draft
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Tune"
+                           Disabled="@(IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode) || !OpenedVersionNo.HasValue)"
+                           Href="@($"/workflow-json/mappings?workflowCode={Uri.EscapeDataString(WorkflowCode)}&versionNo={OpenedVersionNo}&industryId={IndustryId}")">
+                    Configure Mapping
+                </MudButton>
+            </div>
+        </div>
+
+        <div class="admin-grid-3">
+            <MudSelect T="int?"
+                       Value="@SelectedIndustryId"
+                       ValueChanged="@ChangeIndustry"
+                       Label="Industry"
+                       Placeholder="Select industry"
+                       Variant="Variant.Outlined"
+                       Clearable="true">
+
+                @foreach (var industry in Industries)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)industry.Id)">
+                        @industry.IndustryName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string"
+                       Value="@WorkflowCode"
+                       ValueChanged="@ChangeWorkflow"
+                       Label="Workflow"
+                       Placeholder="Select workflow"
+                       Variant="Variant.Outlined"
+                       Disabled="@(IndustryId <= 0)"
+                       Clearable="true">
+
+                @foreach (var workflow in IndustryWorkflows)
+                {
+                    <MudSelectItem T="string" Value="@workflow.WorkflowCode">
+                        @workflow.WorkflowName
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField @bind-Value="VersionName"
+                          Label="New Version Name"
+                          Variant="Variant.Outlined" />
+
+            <MudTextField Value="Status"
+                          Label="Current Status"
+                          ReadOnly="true"
+                          Variant="Variant.Outlined" />
+        </div>
+
+        <MudTable Items="Versions"
+                  Dense="true"
+                  Hover="true"
+                  Class="admin-table">
+            <HeaderContent>
+                <MudTh>Version</MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Published</MudTh>
+                <MudTh>Created</MudTh>
+                <MudTh>Action</MudTh>
+            </HeaderContent>
+
+            <RowTemplate>
+                <MudTd>@context.VersionNo</MudTd>
+                <MudTd>@context.VersionName</MudTd>
+                <MudTd>
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Variant="Variant.Outlined"
+                             Color="@GetStatusColor(context.Status)">
+                        @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    @if (context.IsPublished)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                        <span>Yes</span>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.RemoveCircleOutline" Color="Color.Default" Size="Size.Small" />
+                        <span>No</span>
+                    }
+                </MudTd>
+                <MudTd>@context.CreatedOn.ToLocalTime().ToString("dd-MMM-yyyy HH:mm")</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small"
+                               Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Filled.Visibility"
+                               OnClick="() => OpenVersion(context.VersionNo)">
+                        Open
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <div class="json-editor-card">
+            <div class="json-toolbar">
+                <div>
+                    <MudText Typo="Typo.h6">JSON Definition</MudText>
+                    <MudText Typo="Typo.caption" Class="muted">
+                        Editing a published or archived version never overwrites it. Save creates a new version.
+                    </MudText>
+                </div>
+
+                <MudButton Variant="Variant.Text"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.FormatAlignLeft"
+                           OnClick="@(() => FormatJson())">
+                    Format JSON
+                </MudButton>
+            </div>
+
+            <MudTextField @bind-Value="Json"
+                          Lines="24"
+                          FullWidth="true"
+                          Variant="Variant.Outlined"
+                          InputType="InputType.Text"
+                          Class="json-code-editor" />
+
+            <div class="json-actions">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           Disabled="@IsBusy"
+                           OnClick="() => SaveVersion(false)">
+                    Save Draft
+                </MudButton>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.Publish"
+                           Disabled="@(IsBusy || !OpenedVersionNo.HasValue || IsEditingPublished)"
+                           OnClick="PublishCurrentVersion">
+                    Publish New Version
+                </MudButton>
+            </div>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    private List<WorkflowDto> Workflows = [];
+    private List<IndustrySegmentDto> Industries = [];
+    private List<VersionDto> Versions = [];
+    private IEnumerable<WorkflowDto> IndustryWorkflows => Workflows.Where(x => x.IndustryDetailsId == IndustryId);
+    private string WorkflowCode = string.Empty;
+    private string VersionName = string.Empty;
+    private string Status = "Draft";
+    private string Json = string.Empty;
+    private int? OpenedVersionNo;
+    private bool IsEditingPublished;
+    private bool IsBusy;
+    private int? SelectedIndustryId = null;
+
+    private int IndustryId => SelectedIndustryId ?? 0;
+
+    [SupplyParameterFromQuery(Name = "industryId")] public int? QueryIndustryId { get; set; }
+    [SupplyParameterFromQuery(Name = "workflowCode")] public string? QueryWorkflowCode { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkflows();
+    }
+
+    private async Task LoadWorkflows()
+    {
+        Industries = (await Api.GetAllIndustriesAsync())
+            .OrderBy(x => x.IndustryName)
+            .ToList();
+        Workflows = await Api.GetWorkflowsAsync();
+
+        // Do not silently select the first industry/workflow. The user must choose both.
+        // Deep links may preselect a valid industry/workflow intentionally.
+        SelectedIndustryId = QueryIndustryId.HasValue && Industries.Any(x => x.Id == QueryIndustryId.Value)? QueryIndustryId.Value : null;
+
+        WorkflowCode = !string.IsNullOrWhiteSpace(QueryWorkflowCode)
+            && IndustryWorkflows.Any(x => x.WorkflowCode == QueryWorkflowCode)
+                ? QueryWorkflowCode!
+                : string.Empty;
+
+        Versions = [];
+        OpenedVersionNo = null;
+        VersionName = string.Empty;
+        Status = "Select an industry and workflow";
+        Json = string.Empty;
+        IsEditingPublished = false;
+
+        // Only load an existing version when both selections were explicitly supplied by the URL.
+        if (IndustryId > 0 && !string.IsNullOrWhiteSpace(WorkflowCode))
+            await LoadVersionsAndOpenDefault();
+    }
+
+    private void CreateWorkflow()
+    {
+        Navigation.NavigateTo($"/workflow-json/new?industryId={IndustryId}");
+    }
+
+    private Task ChangeIndustry(int? value)
+    {
+        SelectedIndustryId = value;
+
+        WorkflowCode = string.Empty;
+        Versions = [];
+        OpenedVersionNo = null;
+        VersionName = string.Empty;
+        Json = string.Empty;
+
+        Status = value.HasValue
+            ? "Select a workflow"
+            : "Select an industry and workflow";
+
+        IsEditingPublished = false;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ChangeWorkflow(string value)
+    {
+        WorkflowCode = value;
+        OpenedVersionNo = null;
+        await LoadVersionsAndOpenDefault();
+    }
+
+    private async Task LoadVersionsAndOpenDefault()
+    {
+        Versions = await Api.GetVersionsAsync(WorkflowCode);
+        var defaultVersion = Versions
+            .Where(x => x.IsPublished)
+            .OrderByDescending(x => x.VersionNo)
+            .FirstOrDefault()
+            ?? Versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+
+        if (defaultVersion is not null)
+            await OpenVersion(defaultVersion.VersionNo);
+        else
+        {
+            Json = string.Empty;
+            OpenedVersionNo = null;
+            VersionName = string.Empty;
+            Status = "No versions yet";
+            IsEditingPublished = false;
+        }
+    }
+
+    private async Task OpenVersion(int versionNo)
+    {
+        var version = await Api.GetVersionAsync(WorkflowCode, versionNo);
+        if (version is null)
+        {
+            Snackbar.Add($"Version {versionNo} could not be found.", Severity.Warning);
+            return;
+        }
+
+        OpenedVersionNo = versionNo;
+        VersionName = version.VersionName;
+        Status = version.Status;
+        IsEditingPublished = version.IsPublished
+            || version.Status.Equals("Published", StringComparison.OrdinalIgnoreCase)
+            || version.Status.Equals("Archieve", StringComparison.OrdinalIgnoreCase)
+            || version.Status.Equals("Archived", StringComparison.OrdinalIgnoreCase);
+        Json = version.JsonContent ?? string.Empty;
+    }
+
+    private Task NewDraft()
+    {
+        if (IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode))
+        {
+            Snackbar.Add("Select an industry first, then select its workflow before creating a draft.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+
+        var workflowName =
+            IndustryWorkflows
+                .FirstOrDefault(x => x.WorkflowCode.Equals(
+                    WorkflowCode, StringComparison.OrdinalIgnoreCase))
+                ?.WorkflowName
+            ?? WorkflowCode;
+
+        var definition = new WorkflowDefinitionDto
+        {
+            WorkflowName = workflowName,
+
+            GlobalParams = [],
+            Steps = [],
+            Parameters = [],
+            Rules = [],
+            Validations = []
+        };
+
+        Json = System.Text.Json.JsonSerializer.Serialize(
+            new[] { definition },
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = null
+            });
+
+        OpenedVersionNo = null;
+
+        VersionName =
+            $"{DateTime.Today:dd-MMM-yyyy} - Draft";
+
+        Status = "Draft";
+
+        IsEditingPublished = false;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task PublishCurrentVersion()
+    {
+        if (!OpenedVersionNo.HasValue || string.IsNullOrWhiteSpace(WorkflowCode))
+        {
+            Snackbar.Add("Save a draft first, then configure it before publishing.", Severity.Warning);
+            return;
+        }
+        IsBusy = true;
+        try
+        {
+            var published = await Api.PublishVersionAsync(WorkflowCode, OpenedVersionNo.Value);
+            if (published is null) throw new InvalidOperationException("The API did not return the published version.");
+            Versions = await Api.GetVersionsAsync(WorkflowCode);
+            await OpenVersion(published.VersionNo);
+            Snackbar.Add($"Version V{published.VersionNo} published. The previous published version is now archived.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Version could not be published: {ex.Message}", Severity.Error);
+        }
+        finally { IsBusy = false; }
+    }
+
+    private static Color GetStatusColor(string? status) => status?.ToLowerInvariant() switch
+    {
+        "published" => Color.Success,
+        "draft" => Color.Warning,
+        "archieve" => Color.Default,
+        _ => Color.Info
+    };
+
+    private void FormatJson(bool showMessage = true)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(Json);
+            Json = System.Text.Json.JsonSerializer.Serialize(
+                document,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            if (showMessage)
+                Snackbar.Add("JSON is not valid. Fix the JSON before saving.", Severity.Warning);
+        }
+    }
+
+    private async Task SaveVersion(bool publish = false)
+    {
+        if (IsBusy)
+            return;
+        if (IndustryId <= 0 || string.IsNullOrWhiteSpace(WorkflowCode))
+        {
+            Snackbar.Add("Select an industry and workflow before creating a draft.", Severity.Warning);
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(Json);
+            var definitions = System.Text.Json.JsonSerializer.Deserialize<List<WorkflowDefinitionDto>>(document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? document.RootElement.GetRawText()
+                : "[" + document.RootElement.GetRawText() + "]");
+            var definition = definitions?.FirstOrDefault();
+
+            if (definition is null)
+                throw new InvalidOperationException("JSON must contain a workflow definition object or an array containing one.");
+            if (string.IsNullOrWhiteSpace(WorkflowCode))
+                throw new InvalidOperationException("Select a workflow before saving.");
+            if (definition.Parameters is null || definition.Rules is null || definition.Validations is null)
+                throw new InvalidOperationException("Parameters, Rules and Validations must be valid JSON arrays.");
+
+            if (publish)
+                throw new InvalidOperationException("Publish the saved draft using Publish New Version after configuring mappings, scores, rules and validations.");
+
+            var name = string.IsNullOrWhiteSpace(VersionName)
+                ? $"{DateTime.Today:dd-MMM-yyyy} - Draft"
+                : VersionName.Trim();
+
+            var result = await Api.SaveWorkflowDefinitionAsync(
+                new SaveWorkflowDefinitionRequest
+                {
+                    WorkflowCode = WorkflowCode,
+                    VersionName = name,
+                    Status = "Draft",
+                    IsPublished = false,
+                    Definition = definition
+                });
+
+            if (result is null)
+                throw new InvalidOperationException("The API did not return the saved version.");
+
+            Versions = await Api.GetVersionsAsync(WorkflowCode);
+            await OpenVersion(result.VersionNo);
+            Snackbar.Add($"Draft V{result.VersionNo} saved. Configure parameters, scales, rules and validations before publishing.", Severity.Success);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            Snackbar.Add($"JSON is invalid: {ex.Message}", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Version could not be saved: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}
